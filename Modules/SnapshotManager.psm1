@@ -1,5 +1,17 @@
 Set-StrictMode -Version Latest
 
+function Get-CDSSafeCimInstance {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ClassName)
+
+    try {
+        return Get-CimInstance -ClassName $ClassName -ErrorAction Stop
+    }
+    catch {
+        return $null
+    }
+}
+
 function New-CDSSnapshot {
     [CmdletBinding()]
     param(
@@ -13,7 +25,7 @@ function New-CDSSnapshot {
     }
 
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $computerName = $env:COMPUTERNAME
+    $computerName = if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { [Environment]::MachineName }
     $snapshotPath = Join-Path $SnapshotFolder ("CDS_Snapshot_{0}_{1}.json" -f $computerName, $timestamp)
 
     $serviceData = foreach ($serviceName in $ServicesToWatch) {
@@ -26,13 +38,26 @@ function New-CDSSnapshot {
         }
     }
 
-    $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-    $computer = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
-    $printers = Get-CimInstance -ClassName Win32_Printer -ErrorAction SilentlyContinue |
-        Select-Object Name, DriverName, PortName, PrinterStatus, WorkOffline, Default
-    $usbDevices = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-        Where-Object { $_.InstanceId -like 'USB*' } |
-        Select-Object Status, Class, FriendlyName, InstanceId
+    $os = Get-CDSSafeCimInstance -ClassName 'Win32_OperatingSystem'
+    $computer = Get-CDSSafeCimInstance -ClassName 'Win32_ComputerSystem'
+    $printers = @(Get-CDSSafeCimInstance -ClassName 'Win32_Printer' |
+        Select-Object Name, DriverName, PortName, PrinterStatus, WorkOffline, Default)
+
+    $usbDevices = @()
+    $pnpCommand = Get-Command -Name Get-PnpDevice -ErrorAction SilentlyContinue
+    if ($null -ne $pnpCommand) {
+        $usbDevices = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+            Where-Object { $_.InstanceId -like 'USB*' } |
+            Select-Object Status, Class, FriendlyName, InstanceId)
+    }
+    else {
+        $usbDevices = @(Get-CDSSafeCimInstance -ClassName 'Win32_PnPEntity' |
+            Where-Object { $_.PNPDeviceID -like 'USB*' } |
+            Select-Object @{Name='Status';Expression={$_.Status}},
+                          @{Name='Class';Expression={$_.PNPClass}},
+                          @{Name='FriendlyName';Expression={$_.Name}},
+                          @{Name='InstanceId';Expression={$_.PNPDeviceID}})
+    }
 
     $snapshot = [ordered]@{
         SchemaVersion = '1.0'
@@ -41,15 +66,15 @@ function New-CDSSnapshot {
         UserName      = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
         PowerShell    = $PSVersionTable.PSVersion.ToString()
         OperatingSystem = [ordered]@{
-            Caption      = $os.Caption
-            Version      = $os.Version
-            BuildNumber  = $os.BuildNumber
-            LastBootTime = $os.LastBootUpTime
+            Caption      = if ($os) { $os.Caption } else { $null }
+            Version      = if ($os) { $os.Version } else { $null }
+            BuildNumber  = if ($os) { $os.BuildNumber } else { $null }
+            LastBootTime = if ($os) { $os.LastBootUpTime } else { $null }
         }
         Computer = [ordered]@{
-            Manufacturer = $computer.Manufacturer
-            Model        = $computer.Model
-            TotalMemory  = $computer.TotalPhysicalMemory
+            Manufacturer = if ($computer) { $computer.Manufacturer } else { $null }
+            Model        = if ($computer) { $computer.Model } else { $null }
+            TotalMemory  = if ($computer) { $computer.TotalPhysicalMemory } else { $null }
         }
         Services = @($serviceData)
         Printers = @($printers)
