@@ -71,28 +71,43 @@ function Get-CDSPrinterDiagnostics {
         }
     }
 
-    if ($Name -and $Name.Count -gt 0) {
+    $namePatterns = @($Name | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($namePatterns.Count -gt 0) {
         $printers = @($printers | Where-Object {
             $printerName = [string]$_.Name
-            foreach ($pattern in $Name) {
-                if ($printerName -like $pattern) { return $true }
+            foreach ($pattern in $namePatterns) {
+                if ($printerName -like $pattern) {
+                    return $true
+                }
             }
             return $false
         })
     }
 
-    $printerResults = foreach ($printer in $printers) {
-        $queueJobs = if ($IncludePrintJobs) { @(Get-CDSPrintJobs -PrinterName ([string]$printer.Name)) } else { @() }
+    $printerResults = @(foreach ($printer in $printers) {
+        $queueJobs = if ($IncludePrintJobs) {
+            @(Get-CDSPrintJobs -PrinterName ([string]$printer.Name))
+        }
+        else {
+            @()
+        }
+
         $problemReasons = [System.Collections.Generic.List[string]]::new()
 
-        if (-not $spoolerRunning) { $problemReasons.Add('Spooler läuft nicht.') }
-        if ([bool]$printer.WorkOffline) { $problemReasons.Add('Drucker ist als offline markiert.') }
-        if ([bool]$printer.ErrorCleared -eq $false -and [uint32]$printer.DetectedErrorState -gt 2) {
-            $problemReasons.Add("Erkannter Fehlerstatus: $($printer.DetectedErrorState)")
+        if (-not $spoolerRunning) {
+            [void]$problemReasons.Add('Spooler läuft nicht.')
         }
-        if ([uint32]$printer.PrinterStatus -eq 7) { $problemReasons.Add('Druckerstatus ist Offline.') }
+        if ([bool]$printer.WorkOffline) {
+            [void]$problemReasons.Add('Drucker ist als offline markiert.')
+        }
+        if ([bool]$printer.ErrorCleared -eq $false -and [uint32]$printer.DetectedErrorState -gt 2) {
+            [void]$problemReasons.Add("Erkannter Fehlerstatus: $($printer.DetectedErrorState)")
+        }
+        if ([uint32]$printer.PrinterStatus -eq 7) {
+            [void]$problemReasons.Add('Druckerstatus ist Offline.')
+        }
         if ([uint32]$printer.ExtendedPrinterStatus -in @(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)) {
-            $problemReasons.Add("Erweiterter Druckerstatus meldet ein Problem: $($printer.ExtendedPrinterStatus)")
+            [void]$problemReasons.Add("Erweiterter Druckerstatus meldet ein Problem: $($printer.ExtendedPrinterStatus)")
         }
 
         $healthy = $problemReasons.Count -eq 0
@@ -110,26 +125,26 @@ function Get-CDSPrinterDiagnostics {
         }
 
         [pscustomobject]@{
-            Name                  = [string]$printer.Name
-            Default               = [bool]$printer.Default
-            Network               = [bool]$printer.Network
-            Shared                = [bool]$printer.Shared
-            WorkOffline           = [bool]$printer.WorkOffline
-            DriverName            = [string]$printer.DriverName
-            PortName              = [string]$printer.PortName
-            PrintProcessor        = [string]$printer.PrintProcessor
-            PrinterStatusCode     = [uint32]$printer.PrinterStatus
-            PrinterStatus         = Get-CDSPrinterStatusText -PrinterStatus $printer.PrinterStatus
-            ExtendedStatusCode    = [uint32]$printer.ExtendedPrinterStatus
-            DetectedErrorState    = [uint32]$printer.DetectedErrorState
-            QueueLength           = $queueJobs.Count
-            PrintJobs             = @($queueJobs)
-            Healthy               = $healthy
-            Severity              = if ($healthy) { 'Info' } else { 'Warning' }
-            Problems              = @($problemReasons)
-            Recommendation        = $recommendation
+            Name               = [string]$printer.Name
+            Default            = [bool]$printer.Default
+            Network            = [bool]$printer.Network
+            Shared             = [bool]$printer.Shared
+            WorkOffline        = [bool]$printer.WorkOffline
+            DriverName         = [string]$printer.DriverName
+            PortName           = [string]$printer.PortName
+            PrintProcessor     = [string]$printer.PrintProcessor
+            PrinterStatusCode  = [uint32]$printer.PrinterStatus
+            PrinterStatus      = Get-CDSPrinterStatusText -PrinterStatus $printer.PrinterStatus
+            ExtendedStatusCode = [uint32]$printer.ExtendedPrinterStatus
+            DetectedErrorState = [uint32]$printer.DetectedErrorState
+            QueueLength        = @($queueJobs).Count
+            PrintJobs          = @($queueJobs)
+            Healthy            = $healthy
+            Severity           = if ($healthy) { 'Info' } else { 'Warning' }
+            Problems           = @($problemReasons)
+            Recommendation     = $recommendation
         }
-    }
+    })
 
     $unhealthyPrinters = @($printerResults | Where-Object { -not $_.Healthy })
     $overallHealthy = $spoolerRunning -and $unhealthyPrinters.Count -eq 0
@@ -140,7 +155,7 @@ function Get-CDSPrinterDiagnostics {
         Severity       = if ($overallHealthy) { 'Info' } else { 'Warning' }
         Healthy        = $overallHealthy
         Recommendation = if ($overallHealthy) { 'Keine Maßnahme erforderlich.' } else { 'Details der betroffenen Drucker prüfen.' }
-        Message        = "$($printerResults.Count) Drucker geprüft; $($unhealthyPrinters.Count) mit Auffälligkeiten."
+        Message        = "$(@($printerResults).Count) Drucker geprüft; $($unhealthyPrinters.Count) mit Auffälligkeiten."
         SpoolerStatus  = if ($null -eq $spooler) { 'NOT FOUND' } else { [string]$spooler.Status }
         Printers       = @($printerResults)
         CheckedAt      = Get-Date
