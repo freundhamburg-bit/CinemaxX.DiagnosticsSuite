@@ -14,7 +14,8 @@ $moduleFiles = @(
     'Logger.psm1',
     'ServiceWatcher.psm1',
     'SnapshotManager.psm1',
-    'EventWatcher.psm1'
+    'EventWatcher.psm1',
+    'PrinterDiagnostics.psm1'
 )
 
 foreach ($moduleFile in $moduleFiles) {
@@ -23,7 +24,7 @@ foreach ($moduleFile in $moduleFiles) {
         throw "Erforderliches Modul fehlt: $modulePath"
     }
 
-    Import-Module $modulePath -Force -ErrorAction Stop
+    Import-Module $modulePath -Force -DisableNameChecking -ErrorAction Stop
 }
 
 $config = Initialize-CDSConfig -Path $ConfigPath
@@ -46,6 +47,34 @@ function Invoke-CDSDiagnosticsCycle {
         foreach ($result in $serviceResults) {
             $level = if ($result.Healthy) { 'INFO' } else { 'WARN' }
             Write-CDSLog -Message ("Dienst {0}: {1} ({2})" -f $result.Name, $result.Status, $result.Message) -Level $level -Component 'ServiceWatcher'
+        }
+    }
+
+    if ([bool]$config.EnablePrinterWatcher) {
+        try {
+            $printerDiagnostics = Test-CDSPrinterHealth -IncludePrintJobs
+            $printerLevel = if ($printerDiagnostics.Healthy) { 'INFO' } else { 'WARN' }
+            Write-CDSLog -Message $printerDiagnostics.Message -Level $printerLevel -Component 'PrinterDiagnostics'
+
+            foreach ($printer in @($printerDiagnostics.Printers)) {
+                $details = "Drucker '{0}': Status={1}, Offline={2}, Port={3}, Treiber={4}, Jobs={5}" -f `
+                    $printer.Name,
+                    $printer.PrinterStatus,
+                    $printer.WorkOffline,
+                    $printer.PortName,
+                    $printer.DriverName,
+                    $printer.QueueLength
+
+                $level = if ($printer.Healthy) { 'INFO' } else { 'WARN' }
+                Write-CDSLog -Message $details -Level $level -Component 'PrinterDiagnostics'
+
+                foreach ($problem in @($printer.Problems)) {
+                    Write-CDSLog -Message ("Drucker '{0}': {1}" -f $printer.Name, $problem) -Level WARN -Component 'PrinterDiagnostics'
+                }
+            }
+        }
+        catch {
+            Write-CDSLog -Message "Druckerdiagnose fehlgeschlagen: $($_.Exception.Message)" -Level ERROR -Component 'PrinterDiagnostics'
         }
     }
 
