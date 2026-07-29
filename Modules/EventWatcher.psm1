@@ -8,7 +8,7 @@ function Get-CDSRecentEvents {
         [ValidateRange(1, 5000)][int]$MaxEvents = 200
     )
 
-    $events = foreach ($eventLog in $EventLogs) {
+    $events = @(foreach ($eventLog in $EventLogs) {
         $logName = [string]$eventLog.LogName
         $levels = @($eventLog.Levels | ForEach-Object { [int]$_ })
 
@@ -37,6 +37,15 @@ function Get-CDSRecentEvents {
                               @{Name='Message';Expression={$_.Message}}
         }
         catch {
+            $isEmptyResult =
+                $_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*' -or
+                $_.Exception.Message -like '*keine Ereignisse gefunden*' -or
+                $_.Exception.Message -like '*No events were found*'
+
+            if ($isEmptyResult) {
+                continue
+            }
+
             [pscustomobject]@{
                 LogName          = $logName
                 TimeCreated      = Get-Date
@@ -48,7 +57,7 @@ function Get-CDSRecentEvents {
                 Message          = "Ereignisprotokoll konnte nicht gelesen werden: $($_.Exception.Message)"
             }
         }
-    }
+    })
 
     return @($events | Sort-Object TimeCreated -Descending | Select-Object -First $MaxEvents)
 }
