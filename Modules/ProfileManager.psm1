@@ -47,22 +47,30 @@ function Get-CDSComputerProfile {
     $productType = if ($null -ne $operatingSystem) { [int]$operatingSystem.ProductType } else { 1 }
     $chassisTypes = if ($null -ne $enclosure) { @($enclosure.ChassisTypes | ForEach-Object { [int]$_ }) } else { @() }
 
+    $isLaptopChassis = @($chassisTypes | Where-Object { $_ -in @(8, 9, 10, 14, 18, 21, 30, 31, 32) }).Count -gt 0
+    $isAuresHardware = $manufacturer -match '(?i)AURES' -or $model -match '(?i)YUNO|SANGO|NINO|JAZZ|TWIST'
+    $hasVistaInstallation = (Test-Path -LiteralPath 'F:\Vista' -PathType Container) -or (Test-Path -LiteralPath 'C:\Vista' -PathType Container)
+
     if ($productType -ne 1) {
         $profileName = 'Server'
         $detection = 'Windows ProductType'
     }
-    elseif (
-        $manufacturer -match '(?i)AURES' -or
-        $model -match '(?i)YUNO|SANGO|NINO|JAZZ|TWIST' -or
-        (Test-Path -LiteralPath 'F:\Vista' -PathType Container) -or
-        (Test-Path -LiteralPath 'C:\Vista' -PathType Container)
-    ) {
+    elseif ($isAuresHardware) {
         $profileName = 'POS'
-        $detection = 'POS manufacturer, model or Vista installation'
+        $detection = 'Aures manufacturer or POS model'
     }
-    elseif (@($chassisTypes | Where-Object { $_ -in @(8, 9, 10, 14, 18, 21, 30, 31, 32) }).Count -gt 0) {
+    elseif ($isLaptopChassis) {
         $profileName = 'Laptop'
-        $detection = 'System chassis type'
+        $detection = if ($hasVistaInstallation) {
+            'Laptop chassis; Vista installation ignored as non-exclusive signal'
+        }
+        else {
+            'System chassis type'
+        }
+    }
+    elseif ($hasVistaInstallation) {
+        $profileName = 'POS'
+        $detection = 'Vista installation on workstation hardware'
     }
     else {
         $profileName = 'Laptop'
