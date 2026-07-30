@@ -55,149 +55,7 @@ Write-CDSLog -Message ("Profil {0} erkannt ({1}); Hersteller={2}; Modell={3}." -
 Write-Host "CinemaxX Diagnostics Suite $($config.Version)" -ForegroundColor Cyan
 Write-Host "Profil: $($computerProfile.Name)"
 Write-Host "Logdatei: $logFile"
-# Vista erkennen
-$vista = Get-CDSVistaInformation
 
-if ($vista.Installed) {
-    Write-CDSLog `
-        -Component 'VistaDiagnostics' `
-        -Level INFO `
-        -Message ("Vista gefunden unter {0}; Typ={1}; relevante Dateien={2}." -f `
-            $vista.InstallPath,
-            $vista.InstallationType,
-            @($vista.Files).Count)
-
-    foreach ($file in @($vista.Files)) {
-        $versionText = if ([string]::IsNullOrWhiteSpace([string]$file.Version)) {
-            'keine Dateiversion'
-        }
-        else {
-            $file.Version
-        }
-
-        Write-CDSLog `
-            -Component 'VistaDiagnostics' `
-            -Level INFO `
-            -Message ("Datei {0}; Version={1}; Pfad={2}" -f `
-                $file.Name,
-                $versionText,
-                $file.FullName)
-    }
-}
-else {
-    Write-CDSLog `
-        -Component 'VistaDiagnostics' `
-        -Level INFO `
-        -Message 'Vista wurde nicht gefunden.'
-}
-
-# Erst NACH dem vollständigen if/else-Block
-$logSummary = @(Get-CDSVistaLogSummary -MaxAgeDays 7)
-
-if ($logSummary.Count -eq 0) {
-    Write-CDSLog `
-        -Component 'VistaLogAnalyzer' `
-        -Level INFO `
-        -Message 'Keine relevanten Treffer in aktuellen Vista-Logs gefunden.'
-}
-else {
-    foreach ($entry in $logSummary) {
-        Write-CDSLog `
-            -Component 'VistaLogAnalyzer' `
-            -Level $entry.Severity `
-            -Message ("{0}: {1} Treffer; Datei={2}; Zeile={3}; Text={4}" -f `
-                $entry.Pattern,
-                $entry.Count,
-                $entry.FirstPath,
-                $entry.FirstLineNumber,
-                $entry.FirstLine)
-    }
-}
-$healthChecks = @()
-
-if ($vista.Installed) {
-    $healthChecks += New-CDSHealthCheck `
-        -Name 'Vista Installation' `
-        -Status 'OK' `
-        -Message ("Vista ist unter {0} installiert. Typ={1}" -f `
-            $vista.InstallPath,
-            $vista.InstallationType)
-}
-else {
-    $healthChecks += New-CDSHealthCheck `
-        -Name 'Vista Installation' `
-        -Status 'CRITICAL' `
-        -Message 'Vista wurde nicht gefunden.' `
-        -Recommendation 'Vista-Installation und Installationspfad prüfen.'
-}
-
-$vistaErrorCount = @(
-    $logSummary | Where-Object { $_.Severity -eq 'ERROR' }
-).Count
-
-$vistaWarningCount = @(
-    $logSummary | Where-Object { $_.Severity -eq 'WARNING' }
-).Count
-
-if ($vistaErrorCount -gt 0) {
-    $healthChecks += New-CDSHealthCheck `
-        -Name 'Vista Loganalyse' `
-        -Status 'CRITICAL' `
-        -Message ("Es wurden {0} kritische Fehlermuster gefunden." -f `
-            $vistaErrorCount) `
-        -Recommendation 'Aktuelle Vista-Logs und die gemeldeten Fundstellen prüfen.'
-}
-elseif ($vistaWarningCount -gt 0) {
-    $healthChecks += New-CDSHealthCheck `
-        -Name 'Vista Loganalyse' `
-        -Status 'WARNING' `
-        -Message ("Es wurden {0} Warnungsmuster gefunden." -f `
-            $vistaWarningCount) `
-        -Recommendation 'Warnungen prüfen und mit dem gemeldeten Programmverhalten vergleichen.'
-}
-else {
-    $healthChecks += New-CDSHealthCheck `
-        -Name 'Vista Loganalyse' `
-        -Status 'OK' `
-        -Message 'Keine relevanten Fehler in aktuellen Vista-Logs gefunden.'
-}
-
-$healthSummary = Get-CDSHealthSummary -Checks $healthChecks
-
-Write-CDSLog `
-    -Component 'HealthEngine' `
-    -Level INFO `
-    -Message ("Gesamtstatus={0}; Prüfungen={1}; OK={2}; Warnungen={3}; Kritisch={4}" -f `
-        $healthSummary.OverallStatus,
-        $healthSummary.TotalChecks,
-        $healthSummary.OkCount,
-        $healthSummary.WarningCount,
-        $healthSummary.CriticalCount)
-
-foreach ($check in $healthSummary.Checks) {
-    $logLevel = switch ($check.Status) {
-        'CRITICAL' { 'ERROR' }
-        'WARNING'  { 'WARNING' }
-        default    { 'INFO' }
-    }
-
-    Write-CDSLog `
-        -Component 'HealthEngine' `
-        -Level $logLevel `
-        -Message ("{0}: Status={1}; {2}" -f `
-            $check.Name,
-            $check.Status,
-            $check.Message)
-
-    if (-not [string]::IsNullOrWhiteSpace($check.Recommendation)) {
-        Write-CDSLog `
-            -Component 'HealthEngine' `
-            -Level INFO `
-            -Message ("Empfehlung für {0}: {1}" -f `
-                $check.Name,
-                $check.Recommendation)
-    }
-}
 
 function Invoke-CDSDiagnosticsCycle {
     [CmdletBinding()]
@@ -205,6 +63,8 @@ function Invoke-CDSDiagnosticsCycle {
 
     $cycleStart = Get-Date
     Write-CDSLog -Message 'Diagnosezyklus gestartet.' -Level DEBUG -Component 'Core'
+
+    $serviceResults = @()
 
     if ([bool]$config.EnableServiceWatcher) {
         $serviceResults = @(Test-CDSServices -Name $servicesToWatch)
@@ -247,6 +107,197 @@ function Invoke-CDSDiagnosticsCycle {
         foreach ($event in $events) {
             $message = "{0}/{1} ID {2}: {3}" -f $event.LogName, $event.ProviderName, $event.Id, $event.Message
             Write-CDSLog -Message $message -Level WARN -Component 'EventWatcher'
+        }
+    }
+
+    # Vista-Installation und relevante Dateiversionen prüfen
+    $vista = Get-CDSVistaInformation
+
+    if ($vista.Installed) {
+        Write-CDSLog `
+            -Component 'VistaDiagnostics' `
+            -Level INFO `
+            -Message ("Vista gefunden unter {0}; Typ={1}; relevante Dateien={2}." -f `
+                $vista.InstallPath,
+                $vista.InstallationType,
+                @($vista.Files).Count)
+
+        foreach ($file in @($vista.Files)) {
+            $versionText = if ([string]::IsNullOrWhiteSpace([string]$file.Version)) {
+                'keine Dateiversion'
+            }
+            else {
+                $file.Version
+            }
+
+            Write-CDSLog `
+                -Component 'VistaDiagnostics' `
+                -Level INFO `
+                -Message ("Datei {0}; Version={1}; Pfad={2}" -f `
+                    $file.Name,
+                    $versionText,
+                    $file.FullName)
+        }
+    }
+    else {
+        Write-CDSLog `
+            -Component 'VistaDiagnostics' `
+            -Level INFO `
+            -Message 'Vista wurde nicht gefunden.'
+    }
+
+    # Nur aktuelle Vista-Logs analysieren
+    $logSummary = @(Get-CDSVistaLogSummary -MaxAgeDays 7)
+
+    if ($logSummary.Count -eq 0) {
+        Write-CDSLog `
+            -Component 'VistaLogAnalyzer' `
+            -Level INFO `
+            -Message 'Keine relevanten Treffer in aktuellen Vista-Logs gefunden.'
+    }
+    else {
+        foreach ($entry in $logSummary) {
+            Write-CDSLog `
+                -Component 'VistaLogAnalyzer' `
+                -Level $entry.Severity `
+                -Message ("{0}: {1} Treffer; Datei={2}; Zeile={3}; Text={4}" -f `
+                    $entry.Pattern,
+                    $entry.Count,
+                    $entry.FirstPath,
+                    $entry.FirstLineNumber,
+                    $entry.FirstLine)
+        }
+    }
+
+    # Zentralen Gesundheitsstatus bilden
+    $healthChecks = @()
+
+    if ([bool]$config.EnableServiceWatcher) {
+        foreach ($serviceResult in $serviceResults) {
+            if ($serviceResult.Healthy) {
+                $healthChecks += New-CDSHealthCheck `
+                    -Name ("Dienst {0}" -f $serviceResult.Name) `
+                    -Status 'OK' `
+                    -Message ("Dienst läuft. Starttyp={0}" -f $serviceResult.StartType)
+                continue
+            }
+
+            if ($serviceResult.Status -eq 'NOT FOUND') {
+                $healthChecks += New-CDSHealthCheck `
+                    -Name ("Dienst {0}" -f $serviceResult.Name) `
+                    -Status 'WARNING' `
+                    -Message 'Dienst wurde auf diesem System nicht gefunden.' `
+                    -Recommendation 'Prüfen, ob der Dienst für dieses Geräteprofil überhaupt erforderlich ist.'
+                continue
+            }
+
+            if ($serviceResult.Name -eq 'Spooler') {
+                $healthChecks += New-CDSHealthCheck `
+                    -Name 'Dienst Spooler' `
+                    -Status 'CRITICAL' `
+                    -Message ("Druckwarteschlange ist nicht gestartet. Status={0}; Starttyp={1}" -f `
+                        $serviceResult.Status,
+                        $serviceResult.StartType) `
+                    -Recommendation 'Windows-Dienst Spooler starten und anschließend die Druckerdiagnose erneut ausführen.'
+                continue
+            }
+
+            $healthChecks += New-CDSHealthCheck `
+                -Name ("Dienst {0}" -f $serviceResult.Name) `
+                -Status 'WARNING' `
+                -Message ("Dienst ist nicht gestartet. Status={0}; Starttyp={1}" -f `
+                    $serviceResult.Status,
+                    $serviceResult.StartType) `
+                -Recommendation 'Prüfen, ob der Dienst benötigt wird und gegebenenfalls starten.'
+        }
+    }
+    else {
+        $healthChecks += New-CDSHealthCheck `
+            -Name 'Dienstprüfung' `
+            -Status 'WARNING' `
+            -Message 'Die Dienstprüfung ist in der Konfiguration deaktiviert.' `
+            -Recommendation 'EnableServiceWatcher in der Config prüfen.'
+    }
+
+    if ($vista.Installed) {
+        $healthChecks += New-CDSHealthCheck `
+            -Name 'Vista Installation' `
+            -Status 'OK' `
+            -Message ("Vista ist unter {0} installiert. Typ={1}" -f `
+                $vista.InstallPath,
+                $vista.InstallationType)
+    }
+    else {
+        $healthChecks += New-CDSHealthCheck `
+            -Name 'Vista Installation' `
+            -Status 'CRITICAL' `
+            -Message 'Vista wurde nicht gefunden.' `
+            -Recommendation 'Vista-Installation und Installationspfad prüfen.'
+    }
+
+    $vistaErrorCount = @(
+        $logSummary | Where-Object { $_.Severity -eq 'ERROR' }
+    ).Count
+
+    $vistaWarningCount = @(
+        $logSummary | Where-Object { $_.Severity -eq 'WARNING' }
+    ).Count
+
+    if ($vistaErrorCount -gt 0) {
+        $healthChecks += New-CDSHealthCheck `
+            -Name 'Vista Loganalyse' `
+            -Status 'CRITICAL' `
+            -Message ("Es wurden {0} kritische Fehlermuster gefunden." -f $vistaErrorCount) `
+            -Recommendation 'Aktuelle Vista-Logs und die gemeldeten Fundstellen prüfen.'
+    }
+    elseif ($vistaWarningCount -gt 0) {
+        $healthChecks += New-CDSHealthCheck `
+            -Name 'Vista Loganalyse' `
+            -Status 'WARNING' `
+            -Message ("Es wurden {0} Warnungsmuster gefunden." -f $vistaWarningCount) `
+            -Recommendation 'Warnungen prüfen und mit dem gemeldeten Programmverhalten vergleichen.'
+    }
+    else {
+        $healthChecks += New-CDSHealthCheck `
+            -Name 'Vista Loganalyse' `
+            -Status 'OK' `
+            -Message 'Keine relevanten Fehler in aktuellen Vista-Logs gefunden.'
+    }
+
+    $healthSummary = Get-CDSHealthSummary -Checks $healthChecks
+
+    Write-CDSLog `
+        -Component 'HealthEngine' `
+        -Level INFO `
+        -Message ("Gesamtstatus={0}; Prüfungen={1}; OK={2}; Warnungen={3}; Kritisch={4}" -f `
+            $healthSummary.OverallStatus,
+            $healthSummary.TotalChecks,
+            $healthSummary.OkCount,
+            $healthSummary.WarningCount,
+            $healthSummary.CriticalCount)
+
+    foreach ($check in $healthSummary.Checks) {
+        $logLevel = switch ($check.Status) {
+            'CRITICAL' { 'ERROR' }
+            'WARNING'  { 'WARNING' }
+            default    { 'INFO' }
+        }
+
+        Write-CDSLog `
+            -Component 'HealthEngine' `
+            -Level $logLevel `
+            -Message ("{0}: Status={1}; {2}" -f `
+                $check.Name,
+                $check.Status,
+                $check.Message)
+
+        if (-not [string]::IsNullOrWhiteSpace($check.Recommendation)) {
+            Write-CDSLog `
+                -Component 'HealthEngine' `
+                -Level INFO `
+                -Message ("Empfehlung für {0}: {1}" -f `
+                    $check.Name,
+                    $check.Recommendation)
         }
     }
 
