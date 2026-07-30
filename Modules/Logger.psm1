@@ -4,6 +4,7 @@ $script:LoggerInitialized = $false
 $script:LogFolder = $null
 $script:LogFile = $null
 $script:MinimumLevel = 'INFO'
+$script:Utf8WithBom = New-Object System.Text.UTF8Encoding($true)
 
 function Get-CDSLevelValue {
     [CmdletBinding()]
@@ -35,21 +36,25 @@ function Initialize-CDSUtf8LogFile {
         [Parameter(Mandatory)][string]$Path
     )
 
-    $utf8Bom = [byte[]](0xEF, 0xBB, 0xBF)
-
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        [System.IO.File]::WriteAllBytes($Path, $utf8Bom)
+        [System.IO.File]::WriteAllText($Path, [string]::Empty, $script:Utf8WithBom)
         return
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    if ($bytes.Length -eq 0) {
+        [System.IO.File]::WriteAllText($Path, [string]::Empty, $script:Utf8WithBom)
+        return
+    }
 
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
     if (-not $hasBom) {
-        $combined = New-Object byte[] ($utf8Bom.Length + $bytes.Length)
-        [System.Array]::Copy($utf8Bom, 0, $combined, 0, $utf8Bom.Length)
-        [System.Array]::Copy($bytes, 0, $combined, $utf8Bom.Length, $bytes.Length)
-        [System.IO.File]::WriteAllBytes($Path, $combined)
+        $backupPath = "$Path.pre-utf8"
+        if (-not (Test-Path -LiteralPath $backupPath)) {
+            [System.IO.File]::Copy($Path, $backupPath, $false)
+        }
+
+        [System.IO.File]::WriteAllText($Path, [string]::Empty, $script:Utf8WithBom)
     }
 }
 
@@ -104,7 +109,14 @@ function Write-CDSLog {
 
     $safeMessage = $Message -replace "`r?`n", ' '
     $line = '{0}|{1}|{2}|{3}' -f (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fffK'), $Level.ToUpperInvariant(), $Component, $safeMessage
-    Add-Content -LiteralPath $script:LogFile -Value $line -Encoding UTF8 -ErrorAction Stop
+
+    $writer = New-Object System.IO.StreamWriter($script:LogFile, $true, $script:Utf8WithBom)
+    try {
+        $writer.WriteLine($line)
+    }
+    finally {
+        $writer.Dispose()
+    }
 }
 
 function Get-CDSCurrentLogFile {
