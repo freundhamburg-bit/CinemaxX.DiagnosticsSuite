@@ -91,16 +91,26 @@ else {
 }
 
 # Erst NACH dem vollständigen if/else-Block
-$logSummary = Get-CDSVistaLogSummary
+$logSummary = @(Get-CDSVistaLogSummary -MaxAgeDays 7)
 
-foreach ($entry in @($logSummary)) {
+if ($logSummary.Count -eq 0) {
     Write-CDSLog `
         -Component 'VistaLogAnalyzer' `
         -Level INFO `
-        -Message ("{0}: {1} Treffer ({2})" -f `
-            $entry.Pattern,
-            $entry.Count,
-            $entry.First)
+        -Message 'Keine relevanten Treffer in aktuellen Vista-Logs gefunden.'
+}
+else {
+    foreach ($entry in $logSummary) {
+        Write-CDSLog `
+            -Component 'VistaLogAnalyzer' `
+            -Level $entry.Severity `
+            -Message ("{0}: {1} Treffer; Datei={2}; Zeile={3}; Text={4}" -f `
+                $entry.Pattern,
+                $entry.Count,
+                $entry.FirstPath,
+                $entry.FirstLineNumber,
+                $entry.FirstLine)
+    }
 }
 
 function Invoke-CDSDiagnosticsCycle {
