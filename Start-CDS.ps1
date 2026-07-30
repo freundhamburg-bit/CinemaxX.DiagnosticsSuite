@@ -19,7 +19,8 @@ $moduleFiles = @(
     'SnapshotManager.psm1',
     'EventWatcher.psm1',
     'PrinterDiagnostics.psm1',
-	'VistaDiagnostics.psm1'
+	'VistaDiagnostics.psm1',
+	'VistaLogAnalyzer.psm1'
 )
 
 foreach ($moduleFile in $moduleFiles) {
@@ -87,6 +88,19 @@ else {
         -Component 'VistaDiagnostics' `
         -Level INFO `
         -Message 'Vista wurde nicht gefunden.'
+}
+
+# Erst NACH dem vollständigen if/else-Block
+$logSummary = Get-CDSVistaLogSummary
+
+foreach ($entry in @($logSummary)) {
+    Write-CDSLog `
+        -Component 'VistaLogAnalyzer' `
+        -Level INFO `
+        -Message ("{0}: {1} Treffer ({2})" -f `
+            $entry.Pattern,
+            $entry.Count,
+            $entry.First)
 }
 
 function Invoke-CDSDiagnosticsCycle {
