@@ -57,10 +57,36 @@ Write-Host "Logdatei: $logFile"
 $vista = Get-CDSVistaInformation
 
 if ($vista.Installed) {
-    Write-CDSLog -Component "Vista" -Level INFO -Message "Vista gefunden unter $($vista.InstallPath)"
+    Write-CDSLog `
+        -Component 'VistaDiagnostics' `
+        -Level INFO `
+        -Message ("Vista gefunden unter {0}; Typ={1}; relevante Dateien={2}." -f `
+            $vista.InstallPath,
+            $vista.InstallationType,
+            @($vista.Files).Count)
+
+    foreach ($file in @($vista.Files)) {
+        $versionText = if ([string]::IsNullOrWhiteSpace([string]$file.Version)) {
+            'keine Dateiversion'
+        }
+        else {
+            $file.Version
+        }
+
+        Write-CDSLog `
+            -Component 'VistaDiagnostics' `
+            -Level INFO `
+            -Message ("Datei {0}; Version={1}; Pfad={2}" -f `
+                $file.Name,
+                $versionText,
+                $file.FullName)
+    }
 }
 else {
-    Write-CDSLog -Component "Vista" -Level INFO -Message "Vista wurde nicht gefunden."
+    Write-CDSLog `
+        -Component 'VistaDiagnostics' `
+        -Level INFO `
+        -Message 'Vista wurde nicht gefunden.'
 }
 
 function Invoke-CDSDiagnosticsCycle {
