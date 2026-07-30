@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'Config\Config.json'),
     [ValidateSet('Auto', 'Laptop', 'POS', 'Server')]

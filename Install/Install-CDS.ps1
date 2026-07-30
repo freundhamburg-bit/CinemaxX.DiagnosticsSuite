@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess)]
+﻿[CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$SourcePath = (Split-Path -Parent $PSScriptRoot),
     [string]$DestinationPath = 'C:\Program Files\CinemaxX\DiagnosticsSuite',
