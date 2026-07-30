@@ -1,5 +1,6 @@
 {
-  "Version": "2.0.0-alpha",
+  "Version": "2.1.0-alpha",
+  "Profile": "Auto",
   "LogFolder": "C:\\ProgramData\\CinemaxX\\Diagnostics\\Logs",
   "SnapshotFolder": "C:\\ProgramData\\CinemaxX\\Diagnostics\\Snapshots",
   "ReportFolder": "C:\\ProgramData\\CinemaxX\\Diagnostics\\Reports",
@@ -12,10 +13,22 @@
   "EnableUSBWatcher": true,
   "EnablePrinterWatcher": true,
   "ServicesToWatch": [
-    "Spooler",
-    "BITS",
-    "W3SVC"
+    "Spooler"
   ],
+  "ServiceProfiles": {
+    "Laptop": [
+      "Spooler"
+    ],
+    "POS": [
+      "Spooler",
+      "BITS"
+    ],
+    "Server": [
+      "Spooler",
+      "BITS",
+      "W3SVC"
+    ]
+  },
   "EventLogs": [
     {
       "LogName": "Application",
