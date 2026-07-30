@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'Config\Config.json'),
+    [ValidateSet('Auto', 'Laptop', 'POS', 'Server')]
+    [string]$Profile = 'Auto',
     [switch]$Continuous,
     [switch]$SkipSnapshot
 )
@@ -12,6 +14,7 @@ $moduleFolder = Join-Path $PSScriptRoot 'Modules'
 $moduleFiles = @(
     'ConfigManager.psm1',
     'Logger.psm1',
+    'ProfileManager.psm1',
     'ServiceWatcher.psm1',
     'SnapshotManager.psm1',
     'EventWatcher.psm1',
@@ -28,11 +31,26 @@ foreach ($moduleFile in $moduleFiles) {
 }
 
 $config = Initialize-CDSConfig -Path $ConfigPath
+$configuredProfile = if ($Profile -ne 'Auto') {
+    $Profile
+}
+elseif ($config.PSObject.Properties.Name -contains 'Profile') {
+    [string]$config.Profile
+}
+else {
+    'Auto'
+}
+
+$computerProfile = Get-CDSComputerProfile -Profile $configuredProfile
+$servicesToWatch = @(Get-CDSProfileServices -Profile $computerProfile.Name -Config $config)
+
 $logFile = Initialize-CDSLogger -LogFolder $config.LogFolder -MinimumLevel $config.LogLevel
 [void](Clear-CDSOldLogs -KeepDays ([int]$config.KeepLogsDays))
 
 Write-CDSLog -Message "CinemaxX Diagnostics Suite $($config.Version) gestartet." -Component 'Startup'
+Write-CDSLog -Message ("Profil {0} erkannt ({1}); Hersteller={2}; Modell={3}." -f $computerProfile.Name, $computerProfile.Detection, $computerProfile.Manufacturer, $computerProfile.Model) -Component 'ProfileManager'
 Write-Host "CinemaxX Diagnostics Suite $($config.Version)" -ForegroundColor Cyan
+Write-Host "Profil: $($computerProfile.Name)"
 Write-Host "Logdatei: $logFile"
 
 function Invoke-CDSDiagnosticsCycle {
@@ -43,7 +61,7 @@ function Invoke-CDSDiagnosticsCycle {
     Write-CDSLog -Message 'Diagnosezyklus gestartet.' -Level DEBUG -Component 'Core'
 
     if ([bool]$config.EnableServiceWatcher) {
-        $serviceResults = @(Test-CDSServices -Name @($config.ServicesToWatch))
+        $serviceResults = @(Test-CDSServices -Name $servicesToWatch)
         foreach ($result in $serviceResults) {
             $level = if ($result.Healthy) { 'INFO' } else { 'WARN' }
             Write-CDSLog -Message ("Dienst {0}: {1} ({2})" -f $result.Name, $result.Status, $result.Message) -Level $level -Component 'ServiceWatcher'
@@ -88,7 +106,7 @@ function Invoke-CDSDiagnosticsCycle {
 
     if (-not $SkipSnapshot) {
         try {
-            $snapshotPath = New-CDSSnapshot -SnapshotFolder $config.SnapshotFolder -ServicesToWatch @($config.ServicesToWatch) -KeepSnapshots ([int]$config.KeepSnapshots)
+            $snapshotPath = New-CDSSnapshot -SnapshotFolder $config.SnapshotFolder -ServicesToWatch $servicesToWatch -KeepSnapshots ([int]$config.KeepSnapshots)
             Write-CDSLog -Message "Snapshot erstellt: $snapshotPath" -Level INFO -Component 'SnapshotManager'
         }
         catch {
