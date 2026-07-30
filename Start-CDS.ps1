@@ -18,7 +18,8 @@ $moduleFiles = @(
     'ServiceWatcher.psm1',
     'SnapshotManager.psm1',
     'EventWatcher.psm1',
-    'PrinterDiagnostics.psm1'
+    'PrinterDiagnostics.psm1',
+	'VistaDiagnostics.psm1'
 )
 
 foreach ($moduleFile in $moduleFiles) {
@@ -52,6 +53,15 @@ Write-CDSLog -Message ("Profil {0} erkannt ({1}); Hersteller={2}; Modell={3}." -
 Write-Host "CinemaxX Diagnostics Suite $($config.Version)" -ForegroundColor Cyan
 Write-Host "Profil: $($computerProfile.Name)"
 Write-Host "Logdatei: $logFile"
+# Vista erkennen
+$vista = Get-CDSVistaInformation
+
+if ($vista.Installed) {
+    Write-CDSLog -Component "Vista" -Level INFO -Message "Vista gefunden unter $($vista.InstallPath)"
+}
+else {
+    Write-CDSLog -Component "Vista" -Level INFO -Message "Vista wurde nicht gefunden."
+}
 
 function Invoke-CDSDiagnosticsCycle {
     [CmdletBinding()]
