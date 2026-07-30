@@ -20,7 +20,8 @@ $moduleFiles = @(
     'EventWatcher.psm1',
     'PrinterDiagnostics.psm1',
 	'VistaDiagnostics.psm1',
-	'VistaLogAnalyzer.psm1'
+	'VistaLogAnalyzer.psm1',
+	'HealthEngine.psm1'
 )
 
 foreach ($moduleFile in $moduleFiles) {
@@ -110,6 +111,91 @@ else {
                 $entry.FirstPath,
                 $entry.FirstLineNumber,
                 $entry.FirstLine)
+    }
+}
+$healthChecks = @()
+
+if ($vista.Installed) {
+    $healthChecks += New-CDSHealthCheck `
+        -Name 'Vista Installation' `
+        -Status 'OK' `
+        -Message ("Vista ist unter {0} installiert. Typ={1}" -f `
+            $vista.InstallPath,
+            $vista.InstallationType)
+}
+else {
+    $healthChecks += New-CDSHealthCheck `
+        -Name 'Vista Installation' `
+        -Status 'CRITICAL' `
+        -Message 'Vista wurde nicht gefunden.' `
+        -Recommendation 'Vista-Installation und Installationspfad prüfen.'
+}
+
+$vistaErrorCount = @(
+    $logSummary | Where-Object { $_.Severity -eq 'ERROR' }
+).Count
+
+$vistaWarningCount = @(
+    $logSummary | Where-Object { $_.Severity -eq 'WARNING' }
+).Count
+
+if ($vistaErrorCount -gt 0) {
+    $healthChecks += New-CDSHealthCheck `
+        -Name 'Vista Loganalyse' `
+        -Status 'CRITICAL' `
+        -Message ("Es wurden {0} kritische Fehlermuster gefunden." -f `
+            $vistaErrorCount) `
+        -Recommendation 'Aktuelle Vista-Logs und die gemeldeten Fundstellen prüfen.'
+}
+elseif ($vistaWarningCount -gt 0) {
+    $healthChecks += New-CDSHealthCheck `
+        -Name 'Vista Loganalyse' `
+        -Status 'WARNING' `
+        -Message ("Es wurden {0} Warnungsmuster gefunden." -f `
+            $vistaWarningCount) `
+        -Recommendation 'Warnungen prüfen und mit dem gemeldeten Programmverhalten vergleichen.'
+}
+else {
+    $healthChecks += New-CDSHealthCheck `
+        -Name 'Vista Loganalyse' `
+        -Status 'OK' `
+        -Message 'Keine relevanten Fehler in aktuellen Vista-Logs gefunden.'
+}
+
+$healthSummary = Get-CDSHealthSummary -Checks $healthChecks
+
+Write-CDSLog `
+    -Component 'HealthEngine' `
+    -Level INFO `
+    -Message ("Gesamtstatus={0}; Prüfungen={1}; OK={2}; Warnungen={3}; Kritisch={4}" -f `
+        $healthSummary.OverallStatus,
+        $healthSummary.TotalChecks,
+        $healthSummary.OkCount,
+        $healthSummary.WarningCount,
+        $healthSummary.CriticalCount)
+
+foreach ($check in $healthSummary.Checks) {
+    $logLevel = switch ($check.Status) {
+        'CRITICAL' { 'ERROR' }
+        'WARNING'  { 'WARNING' }
+        default    { 'INFO' }
+    }
+
+    Write-CDSLog `
+        -Component 'HealthEngine' `
+        -Level $logLevel `
+        -Message ("{0}: Status={1}; {2}" -f `
+            $check.Name,
+            $check.Status,
+            $check.Message)
+
+    if (-not [string]::IsNullOrWhiteSpace($check.Recommendation)) {
+        Write-CDSLog `
+            -Component 'HealthEngine' `
+            -Level INFO `
+            -Message ("Empfehlung für {0}: {1}" -f `
+                $check.Name,
+                $check.Recommendation)
     }
 }
 
