@@ -65,6 +65,8 @@ function Invoke-CDSDiagnosticsCycle {
     Write-CDSLog -Message 'Diagnosezyklus gestartet.' -Level DEBUG -Component 'Core'
 
     $serviceResults = @()
+    $printerDiagnostics = $null
+    $printerDiagnosticsError = $null
 
     if ([bool]$config.EnableServiceWatcher) {
         $serviceResults = @(Test-CDSServices -Name $servicesToWatch)
@@ -98,7 +100,8 @@ function Invoke-CDSDiagnosticsCycle {
             }
         }
         catch {
-            Write-CDSLog -Message "Druckerdiagnose fehlgeschlagen: $($_.Exception.Message)" -Level ERROR -Component 'PrinterDiagnostics'
+            $printerDiagnosticsError = $_.Exception.Message
+            Write-CDSLog -Message "Druckerdiagnose fehlgeschlagen: $printerDiagnosticsError" -Level ERROR -Component 'PrinterDiagnostics'
         }
     }
 
@@ -217,6 +220,60 @@ function Invoke-CDSDiagnosticsCycle {
             -Status 'WARNING' `
             -Message 'Die Dienstprüfung ist in der Konfiguration deaktiviert.' `
             -Recommendation 'EnableServiceWatcher in der Config prüfen.'
+    }
+
+    # Druckerdiagnose in den Gesamtstatus übernehmen
+    if ([bool]$config.EnablePrinterWatcher) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$printerDiagnosticsError)) {
+            $healthChecks += New-CDSHealthCheck `
+                -Name 'Druckerdiagnose' `
+                -Status 'CRITICAL' `
+                -Message ("Druckerdiagnose konnte nicht ausgeführt werden: {0}" -f $printerDiagnosticsError) `
+                -Recommendation 'Spooler, WMI/CIM und Windows-Druckerverwaltung prüfen.'
+        }
+        elseif ($null -eq $printerDiagnostics) {
+            $healthChecks += New-CDSHealthCheck `
+                -Name 'Druckerdiagnose' `
+                -Status 'WARNING' `
+                -Message 'Die Druckerdiagnose lieferte kein Ergebnis.' `
+                -Recommendation 'PrinterDiagnostics-Modul und Konfiguration prüfen.'
+        }
+        elseif ($printerDiagnostics.Healthy) {
+            $healthChecks += New-CDSHealthCheck `
+                -Name 'Druckerdiagnose' `
+                -Status 'OK' `
+                -Message $printerDiagnostics.Message
+        }
+        else {
+            $affectedPrinters = @(
+                $printerDiagnostics.Printers |
+                    Where-Object { -not $_.Healthy } |
+                    ForEach-Object { $_.Name }
+            )
+
+            $affectedText = if ($affectedPrinters.Count -gt 0) {
+                $affectedPrinters -join ', '
+            }
+            else {
+                'keine einzelnen Drucker ermittelt'
+            }
+
+            $healthChecks += New-CDSHealthCheck `
+                -Name 'Druckerdiagnose' `
+                -Status 'WARNING' `
+                -Message ("{0} Betroffen: {1}. Spooler={2}" -f `
+                    $printerDiagnostics.Message,
+                    $affectedText,
+                    $printerDiagnostics.SpoolerStatus) `
+                -Recommendation $printerDiagnostics.Recommendation
+        }
+    }
+    else {
+        $healthChecks += New-CDSHealthCheck `
+            -Name 'Druckerdiagnose' `
+            -Status 'WARNING' `
+            -Message 'Die Druckerüberwachung ist in der Konfiguration deaktiviert.' `
+            -Recommendation 'EnablePrinterWatcher in der Config prüfen.'
     }
 
     if ($vista.Installed) {
