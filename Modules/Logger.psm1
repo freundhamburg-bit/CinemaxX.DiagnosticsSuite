@@ -29,6 +29,30 @@ function Get-CDSLogFile {
     return Join-Path $script:LogFolder ("CDS_{0}.log" -f (Get-Date -Format 'yyyy-MM-dd'))
 }
 
+function Initialize-CDSUtf8LogFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $utf8Bom = [byte[]](0xEF, 0xBB, 0xBF)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        [System.IO.File]::WriteAllBytes($Path, $utf8Bom)
+        return
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+
+    if (-not $hasBom) {
+        $combined = New-Object byte[] ($utf8Bom.Length + $bytes.Length)
+        [System.Array]::Copy($utf8Bom, 0, $combined, 0, $utf8Bom.Length)
+        [System.Array]::Copy($bytes, 0, $combined, $utf8Bom.Length, $bytes.Length)
+        [System.IO.File]::WriteAllBytes($Path, $combined)
+    }
+}
+
 function Initialize-CDSLogger {
     [CmdletBinding()]
     param(
@@ -45,9 +69,7 @@ function Initialize-CDSLogger {
         $script:MinimumLevel = $MinimumLevel.ToUpperInvariant()
         $script:LogFile = Get-CDSLogFile
 
-        if (-not (Test-Path -LiteralPath $script:LogFile -PathType Leaf)) {
-            [void](New-Item -Path $script:LogFile -ItemType File -Force -ErrorAction Stop)
-        }
+        Initialize-CDSUtf8LogFile -Path $script:LogFile
 
         $script:LoggerInitialized = $true
         return $script:LogFile
@@ -77,9 +99,7 @@ function Write-CDSLog {
     $currentFile = Get-CDSLogFile
     if ($currentFile -ne $script:LogFile) {
         $script:LogFile = $currentFile
-        if (-not (Test-Path -LiteralPath $script:LogFile)) {
-            [void](New-Item -Path $script:LogFile -ItemType File -Force)
-        }
+        Initialize-CDSUtf8LogFile -Path $script:LogFile
     }
 
     $safeMessage = $Message -replace "`r?`n", ' '
